@@ -1,4 +1,4 @@
-use std::{fmt, vec};
+use std::{cell::RefCell, collections::HashMap, fmt, rc::Rc};
 
 use sha2::{Digest, Sha256};
 
@@ -24,22 +24,24 @@ pub struct MerkleProof {
 pub struct Node<T: Clone> {
     pub content: T,
     pub hash: String,
-    pub left: Option<Box<Node<T>>>,
-    pub right: Option<Box<Node<T>>>,
+    pub left: Option<Rc<Node<T>>>,
+    pub right: Option<Rc<Node<T>>>,
+    pub parent: RefCell<Option<Rc<Node<T>>>>,
 }
 
 impl<T: Clone> Node<T> {
     pub fn new(
         content: T,
         hash: String,
-        left: Option<Box<Node<T>>>,
-        right: Option<Box<Node<T>>>,
+        left: Option<Rc<Node<T>>>,
+        right: Option<Rc<Node<T>>>,
     ) -> Self {
         Node {
             content,
             hash,
             left,
             right,
+            parent: RefCell::new(None),
         }
     }
 }
@@ -47,7 +49,8 @@ impl<T: Clone> Node<T> {
 #[derive(Debug, Clone)]
 pub struct MerkleTree {
     pub data: Vec<String>,
-    pub root: Option<Node<String>>,
+    pub root: Option<Rc<Node<String>>>,
+    pub leaf_map: HashMap<String, Rc<Node<String>>>,
 }
 
 impl fmt::Display for MerkleTree {
@@ -62,76 +65,8 @@ impl fmt::Display for MerkleTree {
     }
 }
 
-// Build Tree
 impl MerkleTree {
-    pub fn new(data: Vec<String>) -> Self {
-        let mut tree = MerkleTree {
-            data: vec![],
-            root: None,
-        };
-        tree.build(data);
-        tree
-    }
-    pub fn build(&mut self, data: Vec<String>) {
-        if data.is_empty() {
-            return;
-        }
-        self.data = data.clone();
-        let nodes: Vec<Node<String>> = data
-            .into_iter()
-            .map(|content| {
-                Node::new(
-                    content.clone(),
-                    MerkleTree::hash(content.as_bytes()),
-                    None,
-                    None,
-                )
-            })
-            .collect();
-        self.build_tree(nodes);
-    }
-    fn build_tree(&mut self, nodes: Vec<Node<String>>) {
-        if nodes.len() == 1 {
-            self.root = Some(nodes[0].clone());
-            return;
-        }
-        let mut new_nodes = Vec::new();
-        for i in (0..nodes.len()).step_by(2) {
-            let left = &nodes[i];
-            let right = nodes.get(i + 1);
-            let content = if right.is_some() {
-                format!("{}{}", left.hash, right.as_ref().unwrap().hash)
-            } else {
-                format!("{}{}", left.hash, left.hash)
-            };
-            let hash = MerkleTree::hash(content.as_bytes());
-            new_nodes.push(Node {
-                content,
-                hash,
-                left: Some(Box::new(left.clone())),
-                right: if right.is_some() {
-                    Some(Box::new(right.unwrap().clone()))
-                } else {
-                    None
-                },
-            });
-        }
-        self.build_tree(new_nodes);
-    }
-}
-
-// Utility functions
-impl MerkleTree {
-    pub fn hash(data: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        let result = hasher.finalize();
-        hex::encode(result)
-    }
-    pub fn get_root_hash(&self) -> Option<String> {
-        self.root.as_ref().map(|node| node.hash.clone())
-    }
-    pub fn print_tree(&self, tree: &mut String, node: &Node<String>, level: usize) {
+    fn print_tree(&self, tree: &mut String, node: &Rc<Node<String>>, level: usize) {
         for _ in 0..level {
             tree.push_str("  ");
         }
@@ -149,52 +84,293 @@ impl MerkleTree {
     }
 }
 
+// Build Tree
+impl MerkleTree {
+    pub fn new(data: Vec<String>) -> Self {
+        let mut tree = MerkleTree {
+            data: vec![],
+            root: None,
+            leaf_map: HashMap::new(),
+        };
+        tree.build(data);
+        tree
+    }
+
+    pub fn build(&mut self, data: Vec<String>) {
+        if data.is_empty() {
+            return;
+        }
+        self.data = data.clone();
+        let nodes: Vec<Rc<Node<String>>> = data
+            .into_iter()
+            .map(|content| {
+                let node = Rc::new(Node::new(
+                    content.clone(),
+                    Self::hash(content.as_bytes()),
+                    None,
+                    None,
+                ));
+                self.leaf_map.insert(content, Rc::clone(&node));
+                node
+            })
+            .collect();
+        self.build_tree(nodes);
+    }
+
+    fn build_tree(&mut self, nodes: Vec<Rc<Node<String>>>) {
+        if nodes.len() == 1 {
+            self.root = Some(Rc::clone(&nodes[0]));
+            return;
+        }
+
+        let mut new_nodes = Vec::new();
+        for i in (0..nodes.len()).step_by(2) {
+            let left = &nodes[i];
+            let right = nodes.get(i + 1);
+
+            let content = if let Some(right_node) = right {
+                format!("{}{}", left.hash, right_node.hash)
+            } else {
+                format!("{}{}", left.hash, left.hash)
+            };
+
+            let hash = Self::hash(content.as_bytes());
+            let parent = Rc::new(Node {
+                content,
+                hash,
+                left: Some(Rc::clone(left)),
+                right: right.map(Rc::clone),
+                parent: RefCell::new(None),
+            });
+
+            // Set parent pointers
+            *left.parent.borrow_mut() = Some(Rc::clone(&parent));
+            if let Some(r) = right {
+                *r.parent.borrow_mut() = Some(Rc::clone(&parent));
+            }
+
+            new_nodes.push(parent);
+        }
+        self.build_tree(new_nodes);
+    }
+}
+
+// Update Tree
+impl MerkleTree {
+    pub fn add(&mut self, data: String) {
+        if self.root.is_none() {
+            // First leaf
+            self.build(vec![data]);
+            return;
+        }
+
+        self.data.push(data.clone());
+
+        let new_leaf = Rc::new(Node {
+            content: data.clone(),
+            hash: Self::hash(data.as_bytes()),
+            left: None,
+            right: None,
+            parent: RefCell::new(None),
+        });
+
+        self.leaf_map.insert(data, new_leaf);
+
+        // Rebuild only from the affected leaf level upward
+        // This is more efficient than full rebuild
+        self.rebuild_from_level_efficient();
+    }
+
+    fn rebuild_from_level_efficient(&mut self) {
+        if self.data.is_empty() {
+            self.root = None;
+            return;
+        }
+
+        // Get all current leaves in order
+        let current_level: Vec<Rc<Node<String>>> = self
+            .data
+            .iter()
+            .filter_map(|data_item| self.leaf_map.get(data_item).cloned())
+            .collect();
+
+        if current_level.is_empty() {
+            return;
+        }
+
+        if current_level.len() == 1 {
+            *current_level[0].parent.borrow_mut() = None;
+            self.root = Some(Rc::clone(&current_level[0]));
+            return;
+        }
+
+        // Build upward from leaves, reusing leaf nodes
+        self.build_parents_from_level(current_level);
+    }
+
+    fn build_parents_from_level(&mut self, mut current_level: Vec<Rc<Node<String>>>) {
+        loop {
+            let mut next_level = Vec::new();
+
+            for i in (0..current_level.len()).step_by(2) {
+                let left = &current_level[i];
+                let right = current_level.get(i + 1);
+
+                // Only create parent if children don't already have matching parent
+                let existing_parent = left.parent.borrow().clone();
+
+                let parent = if let Some(existing) = existing_parent {
+                    // Check if this parent still matches our tree structure
+                    if right.is_some() {
+                        // We have a right sibling, verify parent matches
+                        let right_node = right.unwrap();
+                        let is_correct = existing
+                            .right
+                            .as_ref()
+                            .map(|r| Rc::ptr_eq(r, right_node))
+                            .unwrap_or(false);
+
+                        if is_correct {
+                            // Parent is still valid, reuse it
+                            Rc::clone(&existing)
+                        } else {
+                            // Parent doesn't match, create new one
+                            self.create_new_parent(left, right)
+                        }
+                    } else {
+                        // No right sibling, need new parent for left duplication
+                        self.create_new_parent(left, None)
+                    }
+                } else {
+                    // No existing parent, create new one
+                    self.create_new_parent(left, right)
+                };
+
+                *left.parent.borrow_mut() = Some(Rc::clone(&parent));
+                if let Some(r) = right {
+                    *r.parent.borrow_mut() = Some(Rc::clone(&parent));
+                }
+
+                next_level.push(parent);
+            }
+
+            if next_level.len() == 1 {
+                self.root = Some(Rc::clone(&next_level[0]));
+                break;
+            }
+
+            current_level = next_level;
+        }
+    }
+
+    fn create_new_parent(
+        &self,
+        left: &Rc<Node<String>>,
+        right: Option<&Rc<Node<String>>>,
+    ) -> Rc<Node<String>> {
+        let content = if let Some(right_node) = right {
+            format!("{}{}", left.hash, right_node.hash)
+        } else {
+            format!("{}{}", left.hash, left.hash)
+        };
+
+        let hash = Self::hash(content.as_bytes());
+        Rc::new(Node {
+            content,
+            hash,
+            left: Some(Rc::clone(left)),
+            right: right.map(|r| Rc::clone(r)),
+            parent: RefCell::new(None),
+        })
+    }
+}
+
+// Utility functions
+impl MerkleTree {
+    pub fn hash(data: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        let result = hasher.finalize();
+        hex::encode(result)
+    }
+
+    pub fn get_root_hash(&self) -> Option<String> {
+        self.root.as_ref().map(|node| node.hash.clone())
+    }
+}
+
 // Proof Generation
 impl MerkleTree {
     pub fn generate_proof(&self, leaf: &str) -> MerkleProof {
-        if self.root.is_none() {
+        if !self.leaf_map.contains_key(leaf) {
             return MerkleProof {
-                leaf: String::from(leaf),
+                leaf: leaf.to_string(),
                 proof: vec![],
             };
         }
+
         let mut proof = MerkleProof {
-            leaf: String::from(leaf),
+            leaf: leaf.to_string(),
             proof: vec![],
         };
-        self.get_proofs(leaf, &mut proof.proof, self.root.as_ref().unwrap());
+
+        // Get leaf node from leaf_map and traverse to root
+        if let Some(leaf_node) = self.leaf_map.get(leaf) {
+            proof.proof = self.collect_proof_from_leaf(leaf_node);
+        }
+
         proof
     }
-    fn get_proofs(&self, leaf: &str, proof: &mut Vec<Proof>, curr: &Node<String>) -> bool {
-        if curr.content == leaf {
-            return true;
-        }
-        let mut found = false;
-        if let Some(x) = curr.left.as_ref() {
-            let fl = self.get_proofs(leaf, proof, &x);
-            if fl {
-                proof.push(Proof {
-                    hash: if curr.right.is_some() {
-                        curr.right.clone().unwrap().hash
+
+    fn collect_proof_from_leaf(
+        &self,
+        leaf_node: &Rc<Node<String>>,
+    ) -> Vec<Proof> {
+        let mut current = Some(Rc::clone(leaf_node));
+        let mut proof: Vec<Proof> = vec![];
+
+        while let Some(node) = current {
+            if let Some(parent) = &*node.parent.borrow() {
+                // Determine if current node is left or right child
+                let is_left_child = parent
+                    .left
+                    .as_ref()
+                    .map(|l| Rc::ptr_eq(l, &node))
+                    .unwrap_or(false);
+
+                if is_left_child {
+                    // Current is left child
+                    if let Some(sibling) = &parent.right {
+                        // Has right sibling
+                        proof.push(Proof {
+                            hash: sibling.hash.clone(),
+                            direction: Direction::Right,
+                        });
                     } else {
-                        curr.left.clone().unwrap().hash
-                    },
-                    direction: Direction::Right,
-                });
-                found = fl;
+                        // No right sibling, use current node's hash (it's duplicated)
+                        proof.push(Proof {
+                            hash: node.hash.clone(),
+                            direction: Direction::Right,
+                        });
+                    }
+                } else {
+                    // Current is right child
+                    if let Some(sibling) = &parent.left {
+                        // Has left sibling
+                        proof.push(Proof {
+                            hash: sibling.hash.clone(),
+                            direction: Direction::Left,
+                        });
+                    }
+                }
+
+                current = Some(Rc::clone(parent));
+            } else {
+                // Reached root
+                break;
             }
         }
-        if let Some(x) = curr.right.as_ref() {
-            let fr = self.get_proofs(leaf, proof, &x);
-            if fr {
-                proof.push(Proof {
-                    hash: curr.left.clone().unwrap().hash,
-                    direction: Direction::Left,
-                });
-                found = fr;
-            }
-        }
-        return found;
+        return proof;
     }
 }
 
@@ -204,18 +380,21 @@ impl MerkleTree {
         if self.root.is_none() {
             return false;
         }
-        let mut hash = MerkleTree::hash(proof.leaf.as_bytes());
-        for i in &proof.proof {
-            match i.direction {
+
+        let mut hash = Self::hash(proof.leaf.as_bytes());
+
+        for p in &proof.proof {
+            match p.direction {
                 Direction::Left => {
-                    hash = i.hash.clone() + &hash;
+                    hash = p.hash.clone() + &hash;
                 }
                 Direction::Right => {
-                    hash = hash + &i.hash;
+                    hash = hash + &p.hash;
                 }
             }
-            hash = MerkleTree::hash(hash.as_bytes());
+            hash = Self::hash(hash.as_bytes());
         }
+
         hash == self.get_root_hash().unwrap()
     }
 }
