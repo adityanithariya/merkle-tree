@@ -1,8 +1,9 @@
 use std::{cell::RefCell, collections::HashMap, fmt, rc::Rc};
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Direction {
     Left,
     Right,
@@ -114,11 +115,11 @@ impl MerkleTree {
                 node
             })
             .collect();
-        self.build_tree(nodes);
+        self.build_tree(nodes, true);
     }
 
-    fn build_tree(&mut self, nodes: Vec<Rc<Node<String>>>) {
-        if nodes.len() == 1 {
+    fn build_tree(&mut self, nodes: Vec<Rc<Node<String>>>, is_leaf: bool) {
+        if !is_leaf && nodes.len() == 1 {
             self.root = Some(Rc::clone(&nodes[0]));
             return;
         }
@@ -151,7 +152,7 @@ impl MerkleTree {
 
             new_nodes.push(parent);
         }
-        self.build_tree(new_nodes);
+        self.build_tree(new_nodes, false);
     }
 }
 
@@ -322,10 +323,7 @@ impl MerkleTree {
         proof
     }
 
-    fn collect_proof_from_leaf(
-        &self,
-        leaf_node: &Rc<Node<String>>,
-    ) -> Vec<Proof> {
+    fn collect_proof_from_leaf(&self, leaf_node: &Rc<Node<String>>) -> Vec<Proof> {
         let mut current = Some(Rc::clone(leaf_node));
         let mut proof: Vec<Proof> = vec![];
 
@@ -396,5 +394,196 @@ impl MerkleTree {
         }
 
         hash == self.get_root_hash().unwrap()
+    }
+}
+
+// WebAssembly bindings
+#[cfg(target_arch = "wasm32")]
+pub mod wasm {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+    use wasm_bindgen::prelude::*;
+
+    #[wasm_bindgen]
+    pub struct WasmMerkleTree {
+        tree: MerkleTree,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct WasmProof {
+        pub leaf: String,
+        pub proof: Vec<WasmProofItem>,
+        pub root_hash: String,
+        pub leaf_hash: String,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct WasmProofItem {
+        pub hash: String,
+        pub direction: String,
+    }
+
+    /// Serializable tree node for JSON output
+    #[derive(Serialize, Deserialize, Debug)]
+    pub struct WasmTreeNode {
+        pub hash: String,
+        pub content: Option<String>,
+        pub level: usize,
+        pub left: Option<Box<WasmTreeNode>>,
+        pub right: Option<Box<WasmTreeNode>>,
+    }
+
+    /// Complete tree structure with metadata
+    #[derive(Serialize, Deserialize, Debug)]
+    pub struct WasmTreeStructure {
+        pub root_hash: Option<String>,
+        pub leaves_count: usize,
+        pub leaves: Vec<String>,
+        pub tree: Option<WasmTreeNode>,
+        pub depth: usize,
+    }
+
+    impl WasmTreeNode {
+        fn from_node(node: &Rc<Node<String>>, level: usize) -> Self {
+            let is_leaf = node.left.is_none() && node.right.is_none();
+
+            WasmTreeNode {
+                hash: node.hash.clone(),
+                content: if is_leaf {
+                    Some(node.content.clone())
+                } else {
+                    None
+                },
+                level,
+                left: node
+                    .left
+                    .as_ref()
+                    .map(|n| Box::new(WasmTreeNode::from_node(n, level + 1))),
+                right: node
+                    .right
+                    .as_ref()
+                    .map(|n| Box::new(WasmTreeNode::from_node(n, level + 1))),
+            }
+        }
+
+        fn calculate_depth(&self) -> usize {
+            let left_depth = self.left.as_ref().map(|n| n.calculate_depth()).unwrap_or(0);
+            let right_depth = self
+                .right
+                .as_ref()
+                .map(|n| n.calculate_depth())
+                .unwrap_or(0);
+            1 + std::cmp::max(left_depth, right_depth)
+        }
+    }
+
+    #[wasm_bindgen]
+    impl WasmMerkleTree {
+        /// Create a new Merkle tree with initial data
+        /// Example: WasmMerkleTree.new("a,b,c,d")
+        #[wasm_bindgen(constructor)]
+        pub fn new(data: String) -> WasmMerkleTree {
+            let data_vec: Vec<String> = if data.len() == 0 {
+                vec![]
+            } else {
+                data.split(',').map(|s| s.trim().to_string()).collect()
+            };
+
+            WasmMerkleTree {
+                tree: MerkleTree::new(data_vec),
+            }
+        }
+
+        /// Add a new element to the tree
+        #[wasm_bindgen]
+        pub fn add(&mut self, data: String) {
+            self.tree.add(data);
+        }
+
+        /// Get the root hash
+        #[wasm_bindgen]
+        pub fn get_root_hash(&self) -> Option<String> {
+            self.tree.get_root_hash()
+        }
+
+        /// Generate a proof for a leaf
+        #[wasm_bindgen]
+        pub fn generate_proof(&self, leaf: &str) -> String {
+            let proof = self.tree.generate_proof(leaf);
+            let wasm_proof = WasmProof {
+                leaf: proof.leaf,
+                proof: proof
+                    .proof
+                    .iter()
+                    .map(|p| WasmProofItem {
+                        hash: p.hash.clone(),
+                        direction: match p.direction {
+                            Direction::Left => "Left".to_string(),
+                            Direction::Right => "Right".to_string(),
+                        },
+                    })
+                    .collect(),
+                root_hash: self.tree.get_root_hash().unwrap_or_default(),
+                leaf_hash: MerkleTree::hash(leaf.as_bytes()),
+            };
+            serde_json::to_string(&wasm_proof).unwrap()
+        }
+
+        /// Verify a proof (JSON string format)
+        #[wasm_bindgen]
+        pub fn verify_proof(&self, proof_json: &str) -> bool {
+            if let Ok(wasm_proof) = serde_json::from_str::<WasmProof>(proof_json) {
+                let proof = MerkleProof {
+                    leaf: wasm_proof.leaf,
+                    proof: wasm_proof
+                        .proof
+                        .iter()
+                        .map(|p| Proof {
+                            hash: p.hash.clone(),
+                            direction: if p.direction == "Left" {
+                                Direction::Left
+                            } else {
+                                Direction::Right
+                            },
+                        })
+                        .collect(),
+                };
+                return self.tree.verify_proof(&proof);
+            }
+            false
+        }
+
+        /// Get all leaves (comma-separated)
+        #[wasm_bindgen]
+        pub fn get_leaves(&self) -> String {
+            format!("[{}]", self.tree.data.join(","))
+        }
+
+        /// Get tree structure as JSON with metadata
+        #[wasm_bindgen]
+        pub fn get_tree_structure(&self) -> String {
+            let tree_node = self
+                .tree
+                .root
+                .as_ref()
+                .map(|root| WasmTreeNode::from_node(root, 0));
+
+            let depth = tree_node.as_ref().map(|n| n.calculate_depth()).unwrap_or(0);
+
+            let structure = WasmTreeStructure {
+                root_hash: self.tree.get_root_hash(),
+                leaves_count: self.tree.data.len(),
+                leaves: self.tree.data.clone(),
+                tree: tree_node,
+                depth,
+            };
+
+            serde_json::to_string(&structure).unwrap_or_else(|_| "{}".to_string())
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn hash_data(data: &str) -> String {
+        MerkleTree::hash(data.as_bytes())
     }
 }
