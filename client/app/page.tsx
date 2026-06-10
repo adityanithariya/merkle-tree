@@ -30,20 +30,26 @@ export default function Home() {
   const [proofDialogOpen, setProofDialogOpen] = useState(false);
   const [selectedTxId, setSelectedTransaction] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const initialized = useRef(false);
 
   useEffect(() => {
-    if (transactions.length === 0) return;
+    if (initialized.current) return;
     transactions.forEach((tx) => server.add(tx.id));
     updateTreeState();
+    initialized.current = true;
   }, [transactions]);
 
   // Update tree structure from server
   const updateTreeState = useCallback(() => {
     const structure = JSON.parse(server.get_tree_structure()) as TreeStructure;
+    console.log("Updated tree structure:", structure);
     setTreeStructure(structure);
     setRootHash(structure.root_hash);
-  }, []);
+  }, [server]);
 
+  useEffect(() => {
+    updateTreeState();
+  }, [transactions]);
   // Add new client
   const handleAddClient = () => {
     const colorIndex = clients.length % CLIENT_COLORS.length;
