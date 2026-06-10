@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, ArrowLeft, Shield, Check, Hash } from 'lucide-react';
 import { Button } from './ui/button';
-import { Proof, ProofStep } from '@/lib/types';
+import { Direction, Proof, ProofStep } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 interface ProofDisplayProps {
@@ -101,12 +101,12 @@ function ProofStepSimple({ step }: { step: ProofStep }) {
   return (
     <div className={cn(
       'px-2 py-1.5 rounded border font-mono text-xs truncate max-w-[100px]',
-      step.direction === 'right'
+      step.direction === Direction.Right
         ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
         : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
     )}>
       <span className="mr-1">
-        {step.direction === 'right' ? <ArrowRight className="w-3 h-3 inline" /> : <ArrowLeft className="w-3 h-3 inline" />}
+        {step.direction === Direction.Right ? <ArrowRight className="w-3 h-3 inline" /> : <ArrowLeft className="w-3 h-3 inline" />}
       </span>
       {step.hash.slice(0, 8)}...
     </div>

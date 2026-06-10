@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, ReactNode, ReactElement, HTMLAttributes } from 'react';
 import {
   Server,
   Database,
@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   Network,
+  LucideProps,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -253,7 +254,7 @@ function StatsCard({
   tooltip,
   isHash,
 }: {
-  icon: React.ReactNode;
+  icon: ReactElement<React.RefAttributes<SVGSVGElement> & HTMLAttributes<SVGElement>>;
   label: string;
   value: string;
   color: string;
@@ -263,7 +264,7 @@ function StatsCard({
   return (
     <div className="rounded-lg bg-zinc-800/30 border border-zinc-700/30 p-3 hover:bg-zinc-800/50 transition-colors cursor-default">
       <div className="flex items-center gap-1.5 mb-1 text-zinc-500">
-        {React.cloneElement(icon as React.ReactElement, {
+        {React.cloneElement(icon, {
           className: 'w-3.5 h-3.5',
           style: { color },
         })}
