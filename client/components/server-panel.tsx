@@ -152,7 +152,7 @@ export default function ServerPanel({
             <StatsCard
               icon={<Hash className="w-4 h-4" />}
               label="Root Hash"
-              value={rootHash ? `${rootHash.slice(0, 6)}...` : '—'}
+              value={rootHash ? `${rootHash.slice(0, 18)}...` : '—'}
               color="#f97316"
               tooltip="Unique fingerprint of all transactions"
               isHash

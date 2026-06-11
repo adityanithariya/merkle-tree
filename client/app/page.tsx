@@ -17,10 +17,9 @@ function generateId(): string {
 }
 
 export default function Home() {
-  const [server, setServer] = useState<WasmMerkleTree>(new WasmMerkleTree(''));
   const [treeStructure, setTreeStructure] = useState<TreeStructure | null>(null);
   const [rootHash, setRootHash] = useState<string>('');
-  const { transactions, setTransactions, clients, setClients } = useMerkleTreeStore();
+  const { server, setServer, transactions, setTransactions, clients, setClients } = useMerkleTreeStore();
 
   // New client dialog
   const [highlightedLeaf, setHighlightedLeaf] = useState<string>();
@@ -30,26 +29,13 @@ export default function Home() {
   const [proofDialogOpen, setProofDialogOpen] = useState(false);
   const [selectedTxId, setSelectedTransaction] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const initialized = useRef(false);
 
   useEffect(() => {
-    if (initialized.current) return;
-    transactions.forEach((tx) => server.add(tx.id));
-    updateTreeState();
-    initialized.current = true;
-  }, [transactions]);
-
-  // Update tree structure from server
-  const updateTreeState = useCallback(() => {
     const structure = JSON.parse(server.get_tree_structure()) as TreeStructure;
-    console.log("Updated tree structure:", structure);
     setTreeStructure(structure);
     setRootHash(structure.root_hash);
-  }, [server]);
-
-  useEffect(() => {
-    updateTreeState();
   }, [transactions]);
+
   // Add new client
   const handleAddClient = () => {
     const colorIndex = clients.length % CLIENT_COLORS.length;
@@ -70,7 +56,6 @@ export default function Home() {
     setTransactions(newTransactions);
     var server = new WasmMerkleTree(newTransactions.map((tx) => tx.id).join(','));
     setServer(server);
-    updateTreeState();
   }, [clients]);
 
   const handleAddTransaction = useCallback(
@@ -94,9 +79,8 @@ export default function Home() {
       setTransactions(newServerTransactions);
 
       server.add(transaction.id);
-      updateTreeState();
     },
-    [clients, transactions, updateTreeState]
+    [clients, transactions]
   );
 
   const handleRequestProof = useCallback(
@@ -280,6 +264,9 @@ export default function Home() {
           </div>
         </div>
       </main>
+      <footer className="text-center text-xs text-zinc-500 py-4 pb-10">
+        Made with ❤️ by <a href="https://adityanithariya.com" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">@adityanithariya</a>. Source code on <a href="https://github.com/adityanithariya/merkle-tree" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">GitHub</a>.
+      </footer>
 
       {/* Proof Dialog */}
       <ProofDialog
