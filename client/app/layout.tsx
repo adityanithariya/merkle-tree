@@ -12,10 +12,10 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const APP_NAME = 'Merkle Tree Simulator'
-const APP_DEFAULT_TITLE = 'Merkle Tree Simulator'
-const APP_TITLE_TEMPLATE = '%s - Merkle Tree Simulator'
-const APP_DESCRIPTION = 'Simulate and visualize Merkle Trees with ease. Developed with ❤️ by @adityanithariya'
+const APP_NAME = 'Merkle Tree Visualizer'
+const APP_DEFAULT_TITLE = 'Merkle Tree Visualizer'
+const APP_TITLE_TEMPLATE = '%s - Merkle Tree Visualizer'
+const APP_DESCRIPTION = `Merkle Tree Visualizer for trustless cryptographic verification using hash math | Developed with ❤️ by @adityanithariya`
 
 export const metadata: Metadata = {
   applicationName: APP_NAME,
