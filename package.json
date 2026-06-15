@@ -1,0 +1,23 @@
+{
+  "name": "merkle-tree",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/adityanithariya/merkle-tree#readme",
+  "bugs": {
+    "url": "https://github.com/adityanithariya/merkle-tree/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adityanithariya/merkle-tree.git"
+  },
+  "license": "MIT",
+  "author": "adityanithariya",
+  "type": "commonjs",
+  "main": "index.js",
+  "directories": {
+    "example": "examples"
+  },
+  "scripts": {
+    "dev": "cd client && bun run dev"
+  }
+}

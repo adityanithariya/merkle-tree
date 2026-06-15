@@ -155,10 +155,10 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="text-lg font-bold text-zinc-100">
-                  Cryptographic Verification
+                  Merkle Tree Visualizer
                 </h1>
                 <p className="text-xs text-zinc-500">
-                  Merkle Tree Proof System
+                  Trustless Cryptographic Verification with Merkle Trees
                 </p>
               </div>
             </div>
